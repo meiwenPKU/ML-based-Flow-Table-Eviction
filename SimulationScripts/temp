@@ -1,0 +1,26 @@
+processing tableSize=1024
+sys:1: DtypeWarning: Columns (7,8) have mixed types. Specify dtype option on import or set low_memory=False.
+lruSimulator.py:61: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: http://pandas.pydata.org/pandas-docs/stable/indexing.html#indexing-view-versus-copy
+  data_raw['Time'] = data_raw['Time'].astype(float)
+processing tableSize=2048
+sys:1: DtypeWarning: Columns (7,8) have mixed types. Specify dtype option on import or set low_memory=False.
+lruSimulator.py:61: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: http://pandas.pydata.org/pandas-docs/stable/indexing.html#indexing-view-versus-copy
+  data_raw['Time'] = data_raw['Time'].astype(float)
+processing tableSize=4096
+sys:1: DtypeWarning: Columns (7,8) have mixed types. Specify dtype option on import or set low_memory=False.
+lruSimulator.py:61: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: http://pandas.pydata.org/pandas-docs/stable/indexing.html#indexing-view-versus-copy
+  data_raw['Time'] = data_raw['Time'].astype(float)
+processing tableSize=1024
+./runAllSimulations.sh: 11: ./runAllSimulations.sh: Bad substitution

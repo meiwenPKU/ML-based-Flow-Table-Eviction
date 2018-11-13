@@ -6,10 +6,10 @@ import pandas as pd
 import numpy as np
 import os
 
-dir_path = os.path.dirname(os.path.realpath(__file__))
-parent_path = os.path.abspath(os.path.join(dir_path, os.pardir))
-input_file = parent_path+"/unibs/unibs20090930.csv"
-outputFile = parent_path + '/unibs/unibs20090930-uni-flow.csv'
+#dir_path = os.path.dirname(os.path.realpath(__file__))
+#parent_path = os.path.abspath(os.path.join(dir_path, os.pardir))
+input_file = "/home/yang/sdn-flowTable-management/SIMA2011/SIMA20111010.csv"
+outputFile = '/home/yang/sdn-flowTable-management/SIMA2011/SIMA20111010-uni-flow.csv'
 
 class flowEntry:
     def __init__(self,srcAddr,srcPort,dstAddr,dstPort,protocol,start):
@@ -25,31 +25,26 @@ class flowEntry:
 with open(outputFile,'w') as f:
     f.write('srcAddr,srcPort,dstAddr,dstPort,Packets,Protocol,Start,End\n')
 
-data_raw = pd.read_csv(input_file, usecols=['Time','Source','Destination','Protocol','SrcPort','DesPort'])
-#data_raw = data_raw.query('Time < 1')
-print data_raw.shape
-data_raw = data_raw.query('Protocol != "IPX" & Protocol != "NBIPX"')
-print data_raw.shape
-data_raw['Time'] = data_raw['Time'].astype(float)
-data_raw = data_raw.sort_values(['Time'])
-
 flowTable = {}
-for index, entry in data_raw.iterrows():
-    if index % 10000 == 0:
-        print "processed %d packets" % index
+count = 0
+for chunk in pd.read_csv(input_file, usecols=['Time','Source','Destination','Protocol','SrcPort','DesPort'], chunksize=1000000):
+    print "Processing the %d th chunk" % count
+    count += 1
+    for index, entry in chunk.iterrows():
+        if type(entry['SrcPort']) is not str and type(entry['DesPort']) is not str and (np.isnan(entry['SrcPort']) or np.isnan(entry['DesPort'])):
+            continue
+        if entry['Protocol'] == 'IPX' or entry['Protocol'] == 'NBIPX':
+            continue
 
-    if type(entry['SrcPort']) is not str and type(entry['DesPort']) is not str and (np.isnan(entry['SrcPort']) or np.isnan(entry['DesPort'])):
-        continue
+        entry['SrcPort'] = str(int(entry['SrcPort']))
+        entry['DesPort'] = str(int(entry['DesPort']))
 
-    entry['SrcPort'] = str(int(entry['SrcPort']))
-    entry['DesPort'] = str(int(entry['DesPort']))
-
-    flowID = entry['Source']+"-"+entry['SrcPort']+'-'+entry['Destination']+'-'+entry['DesPort']+'-'+entry['Protocol']
-    if flowID in flowTable:
-        flowTable[flowID].numPkt += 1
-        flowTable[flowID].end = entry['Time']
-    else:
-        flowTable[flowID] = flowEntry(entry['Source'],entry['SrcPort'],entry['Destination'],entry['DesPort'],entry['Protocol'],entry['Time'])
+        flowID = entry['Source']+"-"+entry['SrcPort']+'-'+entry['Destination']+'-'+entry['DesPort']+'-'+entry['Protocol']
+        if flowID in flowTable:
+            flowTable[flowID].numPkt += 1
+            flowTable[flowID].end = entry['Time']
+        else:
+            flowTable[flowID] = flowEntry(entry['Source'],entry['SrcPort'],entry['Destination'],entry['DesPort'],entry['Protocol'],entry['Time'])
 
 with open(outputFile,'ab') as f:
     for key,flow in flowTable.iteritems():

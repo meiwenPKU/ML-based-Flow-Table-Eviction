@@ -16,6 +16,7 @@ global numPredictActive
 global numCorrectPredictInactive
 global numCorrectPredictActive
 global numCapMiss
+global numCapMissTrained
 
 def main(argv):
     global numActiveFlow
@@ -24,16 +25,17 @@ def main(argv):
     global numCorrectPredictInactive
     global numCorrectPredictActive
     global numCapMiss
+    global numCapMissTrained
 
     input_file = ''
     try:
-        opts, args = getopt.getopt(argv,"hi:s:T:m:N:l:p:v:",["ifile=","statFile=","tableSize=","modelFile=","Nlast=","labelEncoder=","probThreshold=","interval="])
+        opts, args = getopt.getopt(argv,"hi:s:T:m:N:l:p:v:r:",["ifile=","statFile=","tableSize=","modelFile=","Nlast=","labelEncoder=","probThreshold=","interval=","timeRange"])
     except getopt.GetoptError:
-        print 'test.py -i <inputfile> -s <statFile> -T <tableSize> -m <modelFile> -N <Nlast>'
+        print 'test.py -i <inputfile> -s <statFile> -T <tableSize> -m <modelFile> -N <Nlast> -r <timeRange>'
         sys.exit(2)
     for opt, arg in opts:
         if opt == '-h':
-            print 'test.py -i <inputfile> -s <statFile> -T <tableSize> -m <modelFile> -N <Nlast>'
+            print 'test.py -i <inputfile> -s <statFile> -T <tableSize> -m <modelFile> -N <Nlast> -r <timeRange>'
             sys.exit()
         elif opt in ("-i", "--ifile"):
             input_file = arg
@@ -51,6 +53,8 @@ def main(argv):
             pe = float(arg)
         elif opt in ("-v", "--interval"):
             interval = int(arg)
+        elif opt in ("-r", "--timeRange"):
+            timeRange = int(arg)
 
     class flowEntry:
         def __init__(self,numPkt,start,end):
@@ -82,23 +86,17 @@ def main(argv):
     data_stat['Start'] = data_stat['Start'].astype(float)
     data_stat['End'] = data_stat['End'].astype(float)
     v_flows = {}
+    trainedFlows = set()
     for index, entry in data_stat.iterrows():
         flowID = entry['srcAddr']+"-"+str(entry['srcPort'])+'-'+entry['dstAddr']+'-'+str(entry['dstPort'])+'-'+entry['Protocol']
         v_flows[flowID] = flowEntry(entry['Packets'],entry['Start'], entry['End'])
+        if entry['Start'] < timeRange:
+            trainedFlows.add(flowID)
 
     #load the scaler model and built RF model
     rf = joblib.load(modelfile)
     le = joblib.load(labelEncoder)
     protocols = le.classes_
-
-    #get the raw packets from traces
-    data_raw = pd.read_csv(input_file, usecols=['Time','Source','Destination','Protocol','Length','SrcPort','DesPort'])
-    data_raw = data_raw.loc[data_raw['Protocol'].isin(protocols)]
-    print data_raw.shape
-    data_raw['Time'] = data_raw['Time'].astype(float)
-    #data_raw = data_raw.query('Time < ' + str(time_range))
-    print data_raw.shape
-    data_raw = data_raw.sort_values(['Time'])
 
     flowTable = {}
     inactiveFlows = {}
@@ -114,6 +112,7 @@ def main(argv):
         global numCorrectPredictInactive
         global numCorrectPredictActive
         global numCapMiss
+        global numCapMissTrained
         for key, entry in flowTable.iteritems():
             if cur_time - entry.lastUpdate < interval and entry.lastUpdate != 0:
                 continue
@@ -152,6 +151,8 @@ def main(argv):
                 if flowTable[key].isActive:
                     numActiveFlow -= 1
                     numCapMiss += 1
+                    if key in trainedFlows:
+                        numCapMissTrained += 1
                     print flowTable[key].__dict__
                 else:
                     inactiveFlows[key].end = cur_time
@@ -188,45 +189,50 @@ def main(argv):
 
     numMissHit = 0
     numCapMiss = 0
-    for entry_index, entry in data_raw.iterrows():
-        if type(entry['SrcPort']) is not str and type(entry['DesPort']) is not str and (np.isnan(entry['SrcPort']) or np.isnan(entry['DesPort'])):
-            continue
+    numCapMissTrained = 0
+    # read the raw data from traces chunk by chunk
+    for chunk in pd.read_csv(input_file, usecols=['Time','Source','Destination','Protocol','Length','SrcPort','DesPort'], chunksize=1000000):
+        for index, entry in chunk.iterrows():
+            if entry['Time'] <= timeRange or (entry['Protocol'] != 'TCP' and entry['Protocol'] != 'UDP'):
+                continue
+            if type(entry['SrcPort']) is not str and type(entry['DesPort']) is not str and (np.isnan(entry['SrcPort']) or np.isnan(entry['DesPort'])):
+                continue
+            entry['SrcPort'] = str(int(entry['SrcPort']))
+            entry['DesPort'] = str(int(entry['DesPort']))
+            flowID = entry['Source']+"-"+entry['SrcPort']+'-'+entry['Destination']+'-'+entry['DesPort']+'-'+entry['Protocol']
+            v_flows[flowID].arrived += 1
+            if flowID not in flowTable:
+                #this is a new flow
+                numActiveFlow += 1
+                if len(flowTable) == tableSize:
+                    removeHPU(entry['Time'])
+                flowTable[flowID] = flowTableEntry(entry['Length'],entry['Time'],entry['Protocol'])
+                numMissHit +=1
+                if numMissHit % 100 == 0:
+                    print "TableSize=%d, numMissHit=%d, numCapMiss=%d, numCapMissTrained=%d, numActiveFlow=%d, Accuracy of active flow=%f, Accuracy of inactive flow=%f, time=%f" % (len(flowTable),numMissHit,numCapMiss,numCapMissTrained,numActiveFlow, numCorrectPredictActive/(numPredictActive+0.00000001), numCorrectPredictInactive/(numPredictInactive+0.000000001),entry['Time'])
+                    numPredictActive = 0
+                    numPredictInactive = 0
+                    numCorrectPredictActive = 0
+                    numCorrectPredictInactive = 0
+            else:
+                # this is not a new flow
+                flowTable[flowID].v_interval.append(entry['Time']-flowTable[flowID].t_last_pkt)
+                if len(flowTable[flowID].v_interval) > N_last-1:
+                    flowTable[flowID].v_interval = flowTable[flowID].v_interval[1:]
+                flowTable[flowID].t_last_pkt = entry['Time']
+                flowTable[flowID].lastUpdate = 0
+                flowTable[flowID].v_len.append(entry['Length'])
+                if len(flowTable[flowID].v_len) > N_last:
+                    flowTable[flowID].v_len = flowTable[flowID].v_len[1:]
 
-        entry['SrcPort'] = str(int(entry['SrcPort']))
-        entry['DesPort'] = str(int(entry['DesPort']))
-        flowID = entry['Source']+"-"+entry['SrcPort']+'-'+entry['Destination']+'-'+entry['DesPort']+'-'+entry['Protocol']
-        v_flows[flowID].arrived += 1
-        if flowID not in flowTable:
-            #this is a new flow
-            numActiveFlow += 1
-            if len(flowTable) == tableSize:
-                removeHPU(entry['Time'])
-            flowTable[flowID] = flowTableEntry(entry['Length'],entry['Time'],entry['Protocol'])
-            numMissHit +=1
-            if numMissHit % 100 == 0:
-                print "TableSize=%d, numMissHit=%d, numCapMiss=%d, numActiveFlow=%d, Accuracy of active flow=%f, Accuracy of inactive flow=%f, time=%f" % (len(flowTable),numMissHit,numCapMiss,numActiveFlow, numCorrectPredictActive/(numPredictActive+0.00000001), numCorrectPredictInactive/(numPredictInactive+0.000000001),entry['Time'])
-                numPredictActive = 0
-                numPredictInactive = 0
-                numCorrectPredictActive = 0
-                numCorrectPredictInactive = 0
-        else:
-            # this is not a new flow
-            flowTable[flowID].v_interval.append(entry['Time']-flowTable[flowID].t_last_pkt)
-            if len(flowTable[flowID].v_interval) > N_last-1:
-                flowTable[flowID].v_interval = flowTable[flowID].v_interval[1:]
-            flowTable[flowID].t_last_pkt = entry['Time']
-            flowTable[flowID].lastUpdate = 0
-            flowTable[flowID].v_len.append(entry['Length'])
-            if len(flowTable[flowID].v_len) > N_last:
-                flowTable[flowID].v_len = flowTable[flowID].v_len[1:]
-
-        if flowTable[flowID].isActive:
-            if v_flows[flowID].numPkt == v_flows[flowID].arrived:
-                flowTable[flowID].isActive = False
-                inactiveFlows[flowID] = inactiveFlow(entry['Time'])
-                numActiveFlow -= 1
+            if flowTable[flowID].isActive:
+                if v_flows[flowID].numPkt == v_flows[flowID].arrived:
+                    flowTable[flowID].isActive = False
+                    inactiveFlows[flowID] = inactiveFlow(entry['Time'])
+                    numActiveFlow -= 1
     print "numMissHit=%d" % numMissHit
     print "numCapMiss=%d" % numCapMiss
+    print "numCapMissTrained=%d" % numCapMissTrained
 
 if __name__ == "__main__":
     main(sys.argv[1:])
