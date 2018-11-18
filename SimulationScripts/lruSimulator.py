@@ -43,9 +43,12 @@ def main(argv):
     data_stat['Start'] = data_stat['Start'].astype(float)
     data_stat['End'] = data_stat['End'].astype(float)
     v_flows = {}
+    trainedFlows = set()
     for index, entry in data_stat.iterrows():
         flowID = entry['srcAddr']+"-"+str(entry['srcPort'])+'-'+entry['dstAddr']+'-'+str(entry['dstPort'])+'-'+entry['Protocol']
         v_flows[flowID] = flowEntry(entry['Packets'],entry['Start'], entry['End'])
+        if entry['Start'] < timeRange:
+            trainedFlows.add(flowID)
     print 'finish reading stats file'
 
 
@@ -71,6 +74,7 @@ def main(argv):
 
     numMissHit = 0
     numCapMiss = 0
+    numCapMissTrained = 0
     numSubFlow = 0
     # read the raw data from traces chunk by chunk
     for chunk in pd.read_csv(input_file, usecols=['Time','Source','Destination','Protocol','Length','SrcPort','DesPort'], chunksize=1000000):
@@ -96,10 +100,12 @@ def main(argv):
                 if flowID in fullFlowTable:
                     numCapMiss += 1
                     fullFlowTable[flowID] += 1
+                    if flowID in trainedFlows:
+                        numCapMissTrained += 1
                 else:
                     fullFlowTable[flowID] = 0
                 if numMissHit % 100 == 0:
-                    print "TableSize=%d, numMissHit=%d, numCapMiss=%d, numActiveFlow=%d, time=%f" % (len(flowTable),numMissHit, numCapMiss, numActiveFlow, entry['Time'])
+                    print "TableSize=%d, numMissHit=%d, numCapMiss=%d, numCapMissTrained=%d, numActiveFlow=%d, time=%f" % (len(flowTable),numMissHit, numCapMiss, numCapMissTrained, numActiveFlow, entry['Time'])
 
             v_flows[flowID].arrived += 1
             if flowTable[flowID].isActive:
@@ -109,6 +115,7 @@ def main(argv):
     print "numMissHit=%d" % numMissHit
     print "numFlow = %d" % len(fullFlowTable)
     print "numCapMiss = %d" % numCapMiss
+    print "numCapMissTrained = %d" % numCapMissTrained
     print "CapMiss distribution"
     for value in fullFlowTable.values():
         print value,

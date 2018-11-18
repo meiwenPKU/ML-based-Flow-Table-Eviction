@@ -8,8 +8,8 @@ import os
 
 #dir_path = os.path.dirname(os.path.realpath(__file__))
 #parent_path = os.path.abspath(os.path.join(dir_path, os.pardir))
-input_file = "/home/yang/sdn-flowTable-management/SIMA2011/SIMA20111010.csv"
-outputFile = '/home/yang/sdn-flowTable-management/SIMA2011/SIMA20111010-uni-flow.csv'
+input_file = "/home/yang/sdn-flowTable-management/univ2/univ2.csv"
+outputFile = '/home/yang/sdn-flowTable-management/univ2/univ2-uni-flow.csv'
 
 class flowEntry:
     def __init__(self,srcAddr,srcPort,dstAddr,dstPort,protocol,start):
