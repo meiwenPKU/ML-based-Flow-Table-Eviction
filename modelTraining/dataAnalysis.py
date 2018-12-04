@@ -290,14 +290,14 @@ val_non_cross_conf = [{0: [np.array([[26005,   938],
 
 
 def stats(conf):
-    train_active = [conf[i][0][0]/(conf[i][0][0] + conf[i][0][1]+0.0) for i in range(5)]
-    train_inactive = [conf[i][1][1]/(conf[i][1][0] + conf[i][1][1]+0.0) for i in range(5)]
+    train_active = [conf[i][0][0]/(conf[i][0][0] + conf[i][0][1]+0.0) for i in range(4)]
+    train_inactive = [conf[i][1][1]/(conf[i][1][0] + conf[i][1][1]+0.0) for i in range(4)]
     precision = [0 if conf[i][1][1]==0 else conf[i][1][1]/(conf[i][1][1]+conf[i][0][1]+0.0) for i in range(5)]
-    f1 = [0 if precision[i] == 0 else 2*precision[i]*train_inactive[i]/(precision[i]+train_inactive[i]) for i in range(5)]
-    print train_active
-    print train_inactive
-    print precision
-    print f1
+    f1 = [0 if precision[i] == 0 else 2*precision[i]*train_inactive[i]/(precision[i]+train_inactive[i]) for i in range(4)]
+    # print train_active
+    # print train_inactive
+    # print precision
+    # print f1
     mean_active = np.mean(train_active)
     std_active = np.std(train_active)
     mean_inactive = np.mean(train_inactive)

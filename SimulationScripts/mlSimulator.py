@@ -10,23 +10,10 @@ from datetime import datetime
 from sklearn.metrics import recall_score
 import os, sys, getopt
 
-global numActiveFlow
-global numPredictInactive
-global numPredictActive
-global numCorrectPredictInactive
-global numCorrectPredictActive
-global numCapMiss
-global numCapMissTrained
+# the first element is for cross flows, and the second is for non-cross
+
 
 def main(argv):
-    global numActiveFlow
-    global numPredictInactive
-    global numPredictActive
-    global numCorrectPredictInactive
-    global numCorrectPredictActive
-    global numCapMiss
-    global numCapMissTrained
-
     input_file = ''
     try:
         opts, args = getopt.getopt(argv,"hi:s:T:m:N:l:p:v:r:",["ifile=","statFile=","tableSize=","modelFile=","Nlast=","labelEncoder=","probThreshold=","interval=","timeRange"])
@@ -72,13 +59,12 @@ def main(argv):
             self.protocol = protocol
             self.lastUpdate = 0
             self.isActive = True
-    class inactiveFlow:
-        def __init__(self,start):
-            self.start = start
-            self.startProb = None
-            self.end = None
-            self.endProb = None
-
+    numPredictInactive = 2*[0]
+    numPredictActive = 2*[0]
+    numCorrectPredictActive = 2*[0]
+    numCorrectPredictInactive = 2*[0]
+    numCapMiss = 2*[0]
+    numActiveFlow = 2*[0]
     #get the flow statistics from stat file
     data_stat = pd.read_csv(stat_file)
     data_stat['srcPort'] = data_stat['srcPort'].astype(int)
@@ -99,20 +85,9 @@ def main(argv):
     protocols = le.classes_
 
     flowTable = {}
-    inactiveFlows = {}
-    numActiveFlow = 0
-    numPredictActive = 0
-    numPredictInactive = 0
-    numCorrectPredictActive = 0
-    numCorrectPredictInactive = 0
+    fullFlowTable = {}
+
     def removeHPU(cur_time):
-        global numActiveFlow
-        global numPredictInactive
-        global numPredictActive
-        global numCorrectPredictInactive
-        global numCorrectPredictActive
-        global numCapMiss
-        global numCapMissTrained
         for key, entry in flowTable.iteritems():
             if cur_time - entry.lastUpdate < interval and entry.lastUpdate != 0:
                 continue
@@ -133,33 +108,23 @@ def main(argv):
             # do the prediction
             entry.prob_end = rf.predict_proba(np.array(sample).reshape(1,-1))[0,1]
             # update the stats
-            if key in inactiveFlows and not inactiveFlows[key].startProb:
-                inactiveFlows[key].startProb = entry.prob_end
-            if (entry.isActive):
-                numPredictActive += 1
+            index = int(key not in trainedFlows)
+            if entry.isActive:
+                numPredictActive[index] += 1
                 if entry.prob_end < 0.5:
-                    numCorrectPredictActive += 1
+                    numCorrectPredictActive[index] += 1
             else:
-                numPredictInactive += 1
+                numPredictInactive[index] += 1
                 if entry.prob_end > 0.5:
-                    numCorrectPredictInactive += 1
+                    numCorrectPredictInactive[index] += 1
                 else:
                     print "negative false prediction: %s, %f" % (', '.join(map(str, sample)), entry.prob_end)
             entry.lastUpdate = cur_time
             if entry.prob_end > 0.9:
                 print "remove %r flow entry with id=%s, tLastVisit=%s, time=%s, confidence=%f" % (flowTable[key].isActive, key,entry.t_last_pkt, cur_time, entry.prob_end)
                 if flowTable[key].isActive:
-                    numActiveFlow -= 1
-                    numCapMiss += 1
-                    if key in trainedFlows:
-                        numCapMissTrained += 1
+                    numActiveFlow[index] -= 1
                     print flowTable[key].__dict__
-                else:
-                    inactiveFlows[key].end = cur_time
-                    inactiveFlows[key].endProb = entry.prob_end
-                    print inactiveFlows[key].__dict__
-                    del inactiveFlows[key]
-
                 del flowTable[key]
                 return
         # get the flow entry with maximal prob_end
@@ -176,22 +141,13 @@ def main(argv):
                     lru_key = key
 
         print "remove %r flow entry with id=%s, tLastVisit=%s, time=%s, confidence=%f" % (flowTable[lru_key].isActive, lru_key,lru.t_last_pkt, cur_time, lru.prob_end)
+        index = int(lru_key not in trainedFlows)
         if flowTable[lru_key].isActive:
-            numActiveFlow -= 1
-            numCapMiss += 1
-            if lru_key in trainedFlows:
-                numCapMissTrained += 1
+            numActiveFlow[index] -= 1
             print flowTable[lru_key].__dict__
-        else:
-            inactiveFlows[lru_key].end = cur_time
-            inactiveFlows[lru_key].endProb = lru.prob_end
-            print inactiveFlows[lru_key].__dict__
-            del inactiveFlows[lru_key]
         del flowTable[lru_key]
 
     numMissHit = 0
-    numCapMiss = 0
-    numCapMissTrained = 0
     # read the raw data from traces chunk by chunk
     for chunk in pd.read_csv(input_file, usecols=['Time','Source','Destination','Protocol','Length','SrcPort','DesPort'], chunksize=1000000):
         for index, entry in chunk.iterrows():
@@ -203,19 +159,27 @@ def main(argv):
             entry['DesPort'] = str(int(entry['DesPort']))
             flowID = entry['Source']+"-"+entry['SrcPort']+'-'+entry['Destination']+'-'+entry['DesPort']+'-'+entry['Protocol']
             v_flows[flowID].arrived += 1
+            index = int(flowID not in trainedFlows)
             if flowID not in flowTable:
                 #this is a new flow
-                numActiveFlow += 1
+                numActiveFlow[index] += 1
                 if len(flowTable) == tableSize:
                     removeHPU(entry['Time'])
                 flowTable[flowID] = flowTableEntry(entry['Length'],entry['Time'],entry['Protocol'])
                 numMissHit +=1
+                if flowID in fullFlowTable:
+                    numCapMiss[index] += 1
+                    fullFlowTable[flowID] += 1
+                else:
+                    fullFlowTable[flowID] = 0
+
                 if numMissHit % 100 == 0:
-                    print "TableSize=%d, numMissHit=%d, numCapMiss=%d, numCapMissTrained=%d, numActiveFlow=%d, Accuracy of active flow=%f, Accuracy of inactive flow=%f, time=%f" % (len(flowTable),numMissHit,numCapMiss,numCapMissTrained,numActiveFlow, numCorrectPredictActive/(numPredictActive+0.00000001), numCorrectPredictInactive/(numPredictInactive+0.000000001),entry['Time'])
-                    numPredictActive = 0
-                    numPredictInactive = 0
-                    numCorrectPredictActive = 0
-                    numCorrectPredictInactive = 0
+                    print "TableSize=%d, numMissHit=%d, numCapMissCross=%d, numCapMissNonCross=%d, numActiveFlowCross=%d, numActiveFlowNonCross=%d, numActivePredictCross=%d, numActivePredictNonCross=%d, numInactivePredictCross=%d, numInactivePredictNonCross=%d, numActiveCorrectPredictCross=%d, numActiveCorrectPredictNonCross=%d, numInactiveCorrectPredictCross=%d, numInactiveCorrectPredictNonCross=%d, time=%f" % (len(flowTable),numMissHit,numCapMiss[0],numCapMiss[1],numActiveFlow[0], numActiveFlow[1], numPredictActive[0], numPredictActive[1], numPredictInactive[0], numPredictInactive[1], numCorrectPredictActive[0], numCorrectPredictActive[1], numCorrectPredictInactive[0], numCorrectPredictInactive[1], entry['Time'])
+
+                    numPredictActive = 2*[0]
+                    numPredictInactive = 2*[0]
+                    numCorrectPredictActive = 2*[0]
+                    numCorrectPredictInactive = 2*[0]
             else:
                 # this is not a new flow
                 flowTable[flowID].v_interval.append(entry['Time']-flowTable[flowID].t_last_pkt)
@@ -230,11 +194,11 @@ def main(argv):
             if flowTable[flowID].isActive:
                 if flowTable[flowID].t_last_pkt >= v_flows[flowID].start + v_flows[flowID].duration:
                     flowTable[flowID].isActive = False
-                    inactiveFlows[flowID] = inactiveFlow(entry['Time'])
-                    numActiveFlow -= 1
+                    numActiveFlow[index] -= 1
     print "numMissHit=%d" % numMissHit
-    print "numCapMiss=%d" % numCapMiss
-    print "numCapMissTrained=%d" % numCapMissTrained
+    print "numCapMissCross=%d" % numCapMiss[0]
+    print "numCapMissNonCross=%d" % numCapMiss[1]
+    print fullFlowTable
 
 if __name__ == "__main__":
     main(sys.argv[1:])
