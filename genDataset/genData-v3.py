@@ -1,9 +1,5 @@
 '''
-This script is to generate training dataset and validation dataset. Different from genData.py, this script does not use simulation to simulate the behavior of the switch but directly generate data samples from each flow. Furthermore, this script will also generate validation set to solve the problem where the trained model cannot be generalized to non-cross flows
-
-The generated training set contains samples in the time range [0, validationRange), while the validation set contains samples in the rage [validationRange, timeRange]
-
-The main challenge for dataset generation is how to set t_idle for data samples because t_idle actually should be a range. In other words, for one data sample, when t_idle in [t0, t1], its label is 0/1
+This script is to generate training dataset and validation dataset. Different from genData-v2.py, this script defines a flow is inactive if the next packet will arrive after t_arrival95, where t_arrival95 is defined as the 95% value in the packet inter-arrival time distribution
 '''
 
 import pandas as pd
@@ -14,7 +10,7 @@ import os, sys, getopt, csv
 def main(argv):
     input_file = ''
     try:
-        opts, args = getopt.getopt(argv,"hi:r:",["ifile=", 'trainRange='])
+        opts, args = getopt.getopt(argv,"hi:r:a:",["ifile=", 'trainRange=', 'arrival95'])
     except getopt.GetoptError:
         print 'test.py -i <inputfile> -r <tainRange>'
         sys.exit(2)
@@ -26,6 +22,8 @@ def main(argv):
             input_file = arg
         elif opt in ("-r", "--timeRange"):
             trainRange = int(arg)
+        elif opt in ("-a", "--arrival95"):
+            arrival95 = float(arg)
 
     N_last = 10
     #write the header for the output file
@@ -35,7 +33,7 @@ def main(argv):
     for i in range(0,N_last-1):
         v_feature.append('i'+str(i)+'-interval')
 
-    output_file = input_file.replace('-split-flows.csv', '-raw-dataset.csv')
+    output_file = input_file.replace('-split-flows.csv', '-raw-dataset-arrival95.csv')
 
     with open(output_file,'w') as csvfile:
         writer = csv.DictWriter(csvfile,fieldnames=v_feature)
@@ -76,6 +74,7 @@ def main(argv):
                     dataset.append(sample[:])
 
             # generate data samples for internal flows
+            #low = max(1, len(pktLens)-N_last+1)
             for i in range(-2, -len(pktLens)-1, -1):
                 if arrivals[i] >= trainRange:
                     continue

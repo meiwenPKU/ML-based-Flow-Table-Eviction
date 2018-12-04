@@ -1,5 +1,5 @@
 '''
-This script is used to simulate the scenario where ml model is applied to pick which flow entry should be evicted from the table.
+Different from mlSimulator.py, this script uses StandardScaler to preprocess data before classification
 '''
 import pandas as pd
 import numpy as np
@@ -18,6 +18,9 @@ global numCorrectPredictActive
 global numCapMiss
 global numCapMissTrained
 
+# TODO: now we only consider two protocols, need to consider all protocols in the future
+protocols = {'TCP':0, 'UDP':1}
+
 def main(argv):
     global numActiveFlow
     global numPredictInactive
@@ -29,7 +32,7 @@ def main(argv):
 
     input_file = ''
     try:
-        opts, args = getopt.getopt(argv,"hi:s:T:m:N:l:p:v:r:",["ifile=","statFile=","tableSize=","modelFile=","Nlast=","labelEncoder=","probThreshold=","interval=","timeRange"])
+        opts, args = getopt.getopt(argv,"hi:s:T:m:N:l:p:v:r:",["ifile=","statFile=","tableSize=","modelFile=","Nlast=","StandardScaler=","probThreshold=","interval=","timeRange"])
     except getopt.GetoptError:
         print 'test.py -i <inputfile> -s <statFile> -T <tableSize> -m <modelFile> -N <Nlast> -r <timeRange>'
         sys.exit(2)
@@ -47,8 +50,8 @@ def main(argv):
             modelfile = arg
         elif opt in ("-N", "--Nlast"):
             N_last = int(arg)
-        elif opt in ("-l", "--labelEncoder"):
-            labelEncoder = arg
+        elif opt in ("-l", "--StandardScaler"):
+            scaler = arg
         elif opt in ("-p", "--probThreshold"):
             pe = float(arg)
         elif opt in ("-v", "--interval"):
@@ -72,12 +75,6 @@ def main(argv):
             self.protocol = protocol
             self.lastUpdate = 0
             self.isActive = True
-    class inactiveFlow:
-        def __init__(self,start):
-            self.start = start
-            self.startProb = None
-            self.end = None
-            self.endProb = None
 
     #get the flow statistics from stat file
     data_stat = pd.read_csv(stat_file)
@@ -93,13 +90,12 @@ def main(argv):
         if entry['Start'] < timeRange:
             trainedFlows.add(flowID)
 
-    #load the scaler model and built RF model
-    rf = joblib.load(modelfile)
-    le = joblib.load(labelEncoder)
-    protocols = le.classes_
+    #load the scaler model and built clf model
+    clf = joblib.load(modelfile)
+    scaler = joblib.load(scaler)
 
     flowTable = {}
-    inactiveFlows = {}
+    fullFlowTable = {}
     numActiveFlow = 0
     numPredictActive = 0
     numPredictInactive = 0
@@ -124,17 +120,18 @@ def main(argv):
             else:
                 sample.append(0)
                 sample.append(0)
-            sample.append((le.transform([entry.protocol]))[0])
+            sample.append(protocols[entry.protocol])
             for i in range(0,N_last):
                 if i >= N_last - len(entry.v_len):
                     sample.append(entry.v_len[i-N_last+len(entry.v_len)])
                 else:
                     sample.append(-1)
+            # normalize the data
+            sample = scaler.transform(np.array(sample).reshape(1,-1))
+            sample[0,3] = protocols[entry.protocol]
             # do the prediction
-            entry.prob_end = rf.predict_proba(np.array(sample).reshape(1,-1))[0,1]
+            entry.prob_end = clf.predict_proba(sample)[0,1]
             # update the stats
-            if key in inactiveFlows and not inactiveFlows[key].startProb:
-                inactiveFlows[key].startProb = entry.prob_end
             if (entry.isActive):
                 numPredictActive += 1
                 if entry.prob_end < 0.5:
@@ -150,16 +147,7 @@ def main(argv):
                 print "remove %r flow entry with id=%s, tLastVisit=%s, time=%s, confidence=%f" % (flowTable[key].isActive, key,entry.t_last_pkt, cur_time, entry.prob_end)
                 if flowTable[key].isActive:
                     numActiveFlow -= 1
-                    numCapMiss += 1
-                    if key in trainedFlows:
-                        numCapMissTrained += 1
                     print flowTable[key].__dict__
-                else:
-                    inactiveFlows[key].end = cur_time
-                    inactiveFlows[key].endProb = entry.prob_end
-                    print inactiveFlows[key].__dict__
-                    del inactiveFlows[key]
-
                 del flowTable[key]
                 return
         # get the flow entry with maximal prob_end
@@ -178,15 +166,7 @@ def main(argv):
         print "remove %r flow entry with id=%s, tLastVisit=%s, time=%s, confidence=%f" % (flowTable[lru_key].isActive, lru_key,lru.t_last_pkt, cur_time, lru.prob_end)
         if flowTable[lru_key].isActive:
             numActiveFlow -= 1
-            numCapMiss += 1
-            if lru_key in trainedFlows:
-                numCapMissTrained += 1
             print flowTable[lru_key].__dict__
-        else:
-            inactiveFlows[lru_key].end = cur_time
-            inactiveFlows[lru_key].endProb = lru.prob_end
-            print inactiveFlows[lru_key].__dict__
-            del inactiveFlows[lru_key]
         del flowTable[lru_key]
 
     numMissHit = 0
@@ -210,6 +190,14 @@ def main(argv):
                     removeHPU(entry['Time'])
                 flowTable[flowID] = flowTableEntry(entry['Length'],entry['Time'],entry['Protocol'])
                 numMissHit +=1
+                if flowID in fullFlowTable:
+                    numCapMiss += 1
+                    fullFlowTable[flowID] += 1
+                    if flowID in trainedFlows:
+                        numCapMissTrained += 1
+                else:
+                    fullFlowTable[flowID] = 0
+
                 if numMissHit % 100 == 0:
                     print "TableSize=%d, numMissHit=%d, numCapMiss=%d, numCapMissTrained=%d, numActiveFlow=%d, Accuracy of active flow=%f, Accuracy of inactive flow=%f, time=%f" % (len(flowTable),numMissHit,numCapMiss,numCapMissTrained,numActiveFlow, numCorrectPredictActive/(numPredictActive+0.00000001), numCorrectPredictInactive/(numPredictInactive+0.000000001),entry['Time'])
                     numPredictActive = 0
@@ -230,7 +218,6 @@ def main(argv):
             if flowTable[flowID].isActive:
                 if flowTable[flowID].t_last_pkt >= v_flows[flowID].start + v_flows[flowID].duration:
                     flowTable[flowID].isActive = False
-                    inactiveFlows[flowID] = inactiveFlow(entry['Time'])
                     numActiveFlow -= 1
     print "numMissHit=%d" % numMissHit
     print "numCapMiss=%d" % numCapMiss

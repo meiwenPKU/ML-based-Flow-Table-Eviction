@@ -1,0 +1,1 @@
+python modelTuning-v2-cl.py -i /home/yang/sdn-flowTable-management/univ2/univ2-raw-dataset.csv -r 550 -N 10 -c gbt -p '{"n_estimators": [20, 30, 40], "max_depth": [5,7,9], "subsample": [0.4, 0.6, 0.8], "learning_rate": [0.1, 0.5, 1]}'
