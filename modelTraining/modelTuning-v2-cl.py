@@ -31,6 +31,7 @@ from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, Gradien
 from sklearn.naive_bayes import GaussianNB
 from sklearn.model_selection import ParameterGrid
 from sklearn.metrics import confusion_matrix
+from sklearn.linear_model import LogisticRegression
 
 supportClfs = {'knn':    KNeighborsClassifier(),
 "svm":    SVC(),
@@ -39,7 +40,8 @@ supportClfs = {'knn':    KNeighborsClassifier(),
 "nn":    MLPClassifier(alpha=1),
 "ada":    AdaBoostClassifier(),
 "gnb":    GaussianNB(),
-"gbt":    GradientBoostingClassifier()}
+"gbt":    GradientBoostingClassifier(),
+"lr":  LogisticRegression() }
 
 def main(argv):
     input_file = ''
@@ -103,10 +105,19 @@ def main(argv):
     # do the 5-fold cross validation on a rolling basis
     aver_active_dis = 0
     clf = supportClfs[clf_name]
-    for i in range(5):
+    N = [5]
+    for i in range(N[0]):
         # analyze data distribution
         print "The %dth validation" % i
         print "Distribution of active and inactive samples"
+        if y_initialTrain.shape[0] == 0:
+            N[0] -= 1
+            # update the training set, merge the x_val_cross[i] and x_val_non_cross[i] with x_initialTrain
+            x_initialTrain = np.copy(x_val_cross[i])
+            y_initialTrain = np.copy(y_val_cross[i])
+            x_initialTrain = np.concatenate((x_initialTrain, x_val_non_cross[i]), axis=0)
+            y_initialTrain = np.concatenate((y_initialTrain, y_val_non_cross[i]), axis=0)
+            continue
         dis = np.bincount(y_initialTrain)
         print dis
         aver_active_dis += dis[0]/(dis[0]+dis[1]+0.0)
@@ -174,10 +185,10 @@ def main(argv):
     print val_non_cross_conf
 
     def stats(conf):
-        train_active = [conf[i][0][0]/(conf[i][0][0] + conf[i][0][1]+0.0) for i in range(5)]
-        train_inactive = [conf[i][1][1]/(conf[i][1][0] + conf[i][1][1]+0.0) for i in range(5)]
-        precision = [0 if conf[i][1][1]==0 else conf[i][1][1]/(conf[i][1][1]+conf[i][0][1]+0.0) for i in range(5)]
-        f1 = [0 if precision[i] == 0 else 2*precision[i]*train_inactive[i]/(precision[i]+train_inactive[i]) for i in range(5)]
+        train_active = [conf[i][0][0]/(conf[i][0][0] + conf[i][0][1]+0.0) for i in range(N[0])]
+        train_inactive = [conf[i][1][1]/(conf[i][1][0] + conf[i][1][1]+0.0) for i in range(N[0])]
+        precision = [0 if conf[i][1][1]==0 else conf[i][1][1]/(conf[i][1][1]+conf[i][0][1]+0.0) for i in range(N[0])]
+        f1 = [0 if precision[i] == 0 else 2*precision[i]*train_inactive[i]/(precision[i]+train_inactive[i]) for i in range(N[0])]
         mean_active = np.mean(train_active)
         std_active = np.std(train_active)
         mean_inactive = np.mean(train_inactive)
@@ -202,7 +213,7 @@ def main(argv):
         print ("%s, %s, %s, %s, %s, %s, %s, %s, " % (ma, sa, mia, sia, mp, sp, mf, sf)),
         ma, sa, mia, sia, mp, sp, mf, sf = stats(val_non_cross_conf[key])
         print ("%s, %s, %s, %s, %s, %s, %s, %s, " % (ma, sa, mia, sia, mp, sp, mf, sf)),
-        val_conf = [val_cross_conf[key][i]+val_non_cross_conf[key][i] for i in range(5)]
+        val_conf = [val_cross_conf[key][i]+val_non_cross_conf[key][i] for i in range(N[0])]
         ma, sa, mia, sia, mp, sp, mf, sf = stats(val_conf)
         print ("%s, %s, %s, %s, %s, %s, %s, %s" % (ma, sa, mia, sia, mp, sp, mf, sf))
 

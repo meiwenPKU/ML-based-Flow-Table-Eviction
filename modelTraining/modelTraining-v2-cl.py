@@ -23,7 +23,7 @@ from sklearn.externals import joblib
 
 #clf = MLPClassifier(alpha=1e-2,hidden_layer_sizes={30}, learning_rate='adaptive', learning_rate_init=1e-2)
 
-clf = RandomForestClassifier(max_depth=15, n_estimators=40, criterion='gini')
+clf = RandomForestClassifier(max_depth=20, n_estimators=20, criterion='gini')
 #clf = joblib.load("/home/yang/sdn-flowTable-management/unibs/unibs20091001-rf-uni-random-1k-10pkt.sav")
 name = 'rf'
 
@@ -49,7 +49,7 @@ def main(argv):
     y_val_cross_file = input_file.replace("-raw-dataset.csv", "-y-val-cross-"+str(Npkt)+'.npz')
     x_val_non_cross_file = input_file.replace("-raw-dataset.csv", "-x-val-non-cross-"+str(Npkt)+"pkt.npz")
     y_val_non_cross_file = input_file.replace("-raw-dataset.csv", "-y-val-non-cross-"+str(Npkt)+"pkt.npz")
-    output_model_file = input_file.replace("-raw-dataset.csv", "-"+name+"-"+str(Npkt)+"pkt.sav")
+    output_model_file = input_file.replace("-raw-dataset.csv", "-"+name+"-20t20d-"+str(Npkt)+"pkt.sav")
     scaler_file = input_file.replace("-raw-dataset.csv", "-scaler-"+str(Npkt)+"pkt.sav")
 
     # convert list to numpy array
@@ -67,24 +67,28 @@ def main(argv):
     y_val_cross = [y_val_cross_npz['arr_0'], y_val_cross_npz['arr_1'], y_val_cross_npz['arr_2'], y_val_cross_npz['arr_3'], y_val_cross_npz['arr_4']]
 
     y_val_non_cross = [y_val_non_cross_npz['arr_0'], y_val_non_cross_npz['arr_1'], y_val_non_cross_npz['arr_2'], y_val_non_cross_npz['arr_3'], y_val_non_cross_npz['arr_4']]
-
     for i in range(5):
         # update the training set, merge the x_val_cross[i] and x_val_non_cross[i] with x_initialTrain
-        clf.fit(x_initialTrain, y_initialTrain)
-        y_train_pred = clf.predict(x_initialTrain)
-        conf_train = confusion_matrix(y_initialTrain, y_train_pred)
-        print conf_train
-        # evaluate the cross flows
-        y_cross_predict = clf.predict(x_val_cross[i])
-        conf_val_cross = confusion_matrix(y_val_cross[i], y_cross_predict)
-        print conf_val_cross
-        # evaluate the non-cross flows
-        y_non_cross_predict = clf.predict(x_val_non_cross[i])
-        conf_val_non_cross = confusion_matrix(y_val_non_cross[i], y_non_cross_predict)
-        print conf_val_non_cross
 
-        x_initialTrain = np.concatenate((x_initialTrain, x_val_cross[i]), axis=0)
-        y_initialTrain = np.concatenate((y_initialTrain, y_val_cross[i]), axis=0)
+        #clf.fit(x_initialTrain, y_initialTrain)
+        #y_train_pred = clf.predict(x_initialTrain)
+        #conf_train = confusion_matrix(y_initialTrain, y_train_pred)
+        #print conf_train
+        # evaluate the cross flows
+        #y_cross_predict = clf.predict(x_val_cross[i])
+        #conf_val_cross = confusion_matrix(y_val_cross[i], y_cross_predict)
+        #print conf_val_cross
+        # evaluate the non-cross flows
+        #y_non_cross_predict = clf.predict(x_val_non_cross[i])
+        #conf_val_non_cross = confusion_matrix(y_val_non_cross[i], y_non_cross_predict)
+        #print conf_val_non_cross
+        if y_initialTrain.shape[0] == 0:
+            # update the training set, merge the x_val_cross[i] and x_val_non_cross[i] with x_initialTrain
+            x_initialTrain = np.copy(x_val_cross[i])
+            y_initialTrain = np.copy(y_val_cross[i])
+        else:
+            x_initialTrain = np.concatenate((x_initialTrain, x_val_cross[i]), axis=0)
+            y_initialTrain = np.concatenate((y_initialTrain, y_val_cross[i]), axis=0)
         x_initialTrain = np.concatenate((x_initialTrain, x_val_non_cross[i]), axis=0)
         y_initialTrain = np.concatenate((y_initialTrain, y_val_non_cross[i]), axis=0)
     # normalize the data
