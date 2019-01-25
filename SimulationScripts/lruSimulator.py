@@ -76,6 +76,7 @@ def main(argv):
     numCapMiss = 0
     numCapMissTrained = 0
     numSubFlow = 0
+    numEviction = 0
     # read the raw data from traces chunk by chunk
     for chunk in pd.read_csv(input_file, usecols=['Time','Source','Destination','Protocol','Length','SrcPort','DesPort'], chunksize=1000000):
         for index, entry in chunk.iterrows():
@@ -94,6 +95,7 @@ def main(argv):
                 # this is a new flow
                 numActiveFlow += 1
                 if len(flowTable) == tableSize:
+                    numEviction += 1
                     removeLRU()
                 flowTable[flowID] = flowTableEntry(entry['Time'])
                 numMissHit += 1
@@ -116,6 +118,7 @@ def main(argv):
     print "numFlow = %d" % len(fullFlowTable)
     print "numCapMiss = %d" % numCapMiss
     print "numCapMissTrained = %d" % numCapMissTrained
+    print "numEviction = %d" % numEviction
     print "CapMiss distribution"
     for value in fullFlowTable.values():
         print value,

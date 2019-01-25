@@ -16,6 +16,15 @@ import csv
 import os
 import sys, getopt
 
+pktLenBytes = 1
+timeIntervalBytes = 1
+maxPktLen = 1500
+maxTimeInterval = 10
+deltaPktLen = maxPktLen/float(1 << (pktLenBytes * 8))
+deltaTimeInterval = maxTimeInterval / float( 1 << (timeIntervalBytes * 8))
+pktLensBins = np.arange(0, maxPktLen, deltaPktLen)
+timeIntervalBins = np.arange(0, maxTimeInterval, deltaTimeInterval)
+
 def main(argv):
     input_file = ''
     output_file = ''
@@ -43,7 +52,7 @@ def main(argv):
         elif opt in ("-p", "--policy"):
             policy = arg
 
-    N_last = 10
+    N_last = 5
     class flowEntry:
         def __init__(self,numPkt,start,end):
             self.numPkt = numPkt
@@ -95,22 +104,20 @@ def main(argv):
                 continue
             x.isUpdate = False
             x.last_record = cur_time
-            sample = [v_flows[key].start, v_flows[key].start+v_flows[key].duration, cur_time, cur_time -x.t_last_pkt,x.protocol]
+            if len(x.v_len) < N_last:
+                # we will ignore the flow entry referred by less than N_last packets
+                continue
+            sample = [v_flows[key].start, v_flows[key].start+v_flows[key].duration, cur_time]
+            sample.extend(np.digitize([cur_time -x.t_last_pkt], timeIntervalBins))
+            sample.append(x.protocol)
             if x.isEnd:
                 sample.append(1)
             else:
                 sample.append(0)
-
-            for i in range(0,N_last):
-                if i >= N_last-len(x.v_len):
-                    sample.append(x.v_len[i-N_last+len(x.v_len)])
-                else:
-                    sample.append(-1)
-            for i in range(0,N_last-1):
-                if i >= N_last-1-len(x.v_interval):
-                    sample.append(x.v_interval[i-N_last+1+len(x.v_interval)])
-                else:
-                    sample.append(-1)
+            vec_len = np.digitize(x.v_len, pktLensBins)
+            vec_interval = np.digitize(x.v_interval, timeIntervalBins)
+            sample.extend(vec_len)
+            sample.extend(vec_interval)
             dataset.append(sample[:])
         if policy == 'lru':
             min_lrt = flowTable.values()[0]
