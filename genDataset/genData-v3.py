@@ -20,8 +20,8 @@ pktLenBytes = 1
 timeIntervalBytes = 1
 maxPktLen = 1500
 maxTimeInterval = 10
-deltaPktLen = maxPktLen/float(1 << (pktLenBytes * 8))
-deltaTimeInterval = maxTimeInterval / float( 1 << (timeIntervalBytes * 8))
+deltaPktLen = maxPktLen/float((1 << (pktLenBytes * 8)) - 1)
+deltaTimeInterval = maxTimeInterval / float( (1 << (timeIntervalBytes * 8)) - 1)
 pktLensBins = np.arange(0, maxPktLen, deltaPktLen)
 timeIntervalBins = np.arange(0, maxTimeInterval, deltaTimeInterval)
 
@@ -52,7 +52,7 @@ def main(argv):
         elif opt in ("-p", "--policy"):
             policy = arg
 
-    N_last = 5
+    N_last = 10
     class flowEntry:
         def __init__(self,numPkt,start,end):
             self.numPkt = numPkt
@@ -104,9 +104,6 @@ def main(argv):
                 continue
             x.isUpdate = False
             x.last_record = cur_time
-            if len(x.v_len) < N_last:
-                # we will ignore the flow entry referred by less than N_last packets
-                continue
             sample = [v_flows[key].start, v_flows[key].start+v_flows[key].duration, cur_time]
             sample.extend(np.digitize([cur_time -x.t_last_pkt], timeIntervalBins))
             sample.append(x.protocol)
@@ -116,8 +113,16 @@ def main(argv):
                 sample.append(0)
             vec_len = np.digitize(x.v_len, pktLensBins)
             vec_interval = np.digitize(x.v_interval, timeIntervalBins)
-            sample.extend(vec_len)
-            sample.extend(vec_interval)
+            for i in range(0,N_last):
+                if i >= N_last-len(x.v_len):
+                    sample.append(vec_len[i-N_last+len(x.v_len)])
+                else:
+                    sample.append(0)
+            for i in range(0,N_last-1):
+                if i >= N_last-1-len(x.v_interval):
+                    sample.append(x.v_interval[i-N_last+1+len(x.v_interval)])
+                else:
+                    sample.append(0)
             dataset.append(sample[:])
         if policy == 'lru':
             min_lrt = flowTable.values()[0]
@@ -153,7 +158,7 @@ def main(argv):
             if flowID in flowTable:
                 # this is not a new flow
                 flowTable[flowID].isUpdate = True
-                if len(flowTable[flowID].v_interval) == N_last:
+                if len(flowTable[flowID].v_interval) == N_last-1:
                     flowTable[flowID].v_interval = flowTable[flowID].v_interval[1:]
                     flowTable[flowID].v_interval.append(entry['Time']-flowTable[flowID].t_last_pkt)
                 else:
